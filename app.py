@@ -14,8 +14,18 @@ import json
 # 1. アプリケーションの初期設定
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'default_secret_key')
-basedir = os.path.abspath(os.path.dirname(__file__))
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(basedir, 'data.sqlite')
+
+# ★★★ ここからが本番環境と開発環境を切り替えるための修正です ★★★
+# Renderの環境変数にDATABASE_URLがあればそれを使い、なければSQLiteを使う
+if os.getenv('DATABASE_URL'):
+    # RenderのPostgreSQL URLは 'postgres://' で始まるため、SQLAlchemyが認識できるように 'postgresql://' に置換します
+    app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL').replace("postgres://", "postgresql://", 1)
+else:
+    # 開発環境（あなたのPC）では、これまで通り 'data.sqlite' を使います
+    basedir = os.path.abspath(os.path.dirname(__file__))
+    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(basedir, 'data.sqlite')
+# ★★★ ここまでが修正箇所です ★★★
+
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 migrate = Migrate(app, db)
