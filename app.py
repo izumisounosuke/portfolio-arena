@@ -15,16 +15,11 @@ import json
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'default_secret_key')
 
-# ★★★ ここからが本番環境と開発環境を切り替えるための修正です ★★★
-# Renderの環境変数にDATABASE_URLがあればそれを使い、なければSQLiteを使う
 if os.getenv('DATABASE_URL'):
-    # RenderのPostgreSQL URLは 'postgres://' で始まるため、SQLAlchemyが認識できるように 'postgresql://' に置換します
     app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL').replace("postgres://", "postgresql://", 1)
 else:
-    # 開発環境（あなたのPC）では、これまで通り 'data.sqlite' を使います
     basedir = os.path.abspath(os.path.dirname(__file__))
     app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(basedir, 'data.sqlite')
-# ★★★ ここまでが修正箇所です ★★★
 
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
@@ -116,14 +111,17 @@ class ProfileForm(FlaskForm):
 def index():
     return render_template('index.html')
 
+# ★★★ register関数のロジックを修正 ★★★
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     form = RegistrationForm()
     if form.validate_on_submit():
         user = User(username=form.username.data, password=form.password.data)
         db.session.add(user)
-        db.session.commit()
-        check_achievements(user)
+        # 称号のチェックをコミットの前に行う
+        check_achievements(user) 
+        # ユーザー作成と称号付与をまとめてコミット
+        db.session.commit() 
         flash('登録が完了しました。ログインしてください。','success')
         return redirect(url_for('login'))
     return render_template('register.html', form=form)
@@ -190,8 +188,11 @@ def dashboard():
                                     financial_investment=form.financial_investment.data,
                                     user_id=current_user.id)
             db.session.add(investment)
-        db.session.commit()
+        
+        # 称号チェックをコミットの前に行う
         check_achievements(current_user)
+        # データ保存と称号付与をまとめてコミット
+        db.session.commit()
         flash(f"{form.year_month.data}の活動を記録しました！",'success')
         return redirect(url_for('dashboard'))
 
@@ -271,41 +272,55 @@ ACHIEVEMENTS = {
     'saving_guardian_gold': {'name': '貯蓄の守り手（金）', 'description': '貯金部門で上位10%以内を達成しました。'},
 }
 
+# ★★★ check_achievements関数のロジックを修正 ★★★
 def check_achievements(user):
-    with app.app_context():
-        for key, value in ACHIEVEMENTS.items():
-            if not Achievement.query.filter_by(name=value['name']).first():
-                ach = Achievement(name=value['name'], description=value['description'], icon=f"{key}.png")
-                db.session.add(ach)
-        db.session.commit()
-        earned_ach_names = [ach.name for ach in user.achievements]
-        if ACHIEVEMENTS['first_step']['name'] not in earned_ach_names:
-            ach = Achievement.query.filter_by(name=ACHIEVEMENTS['first_step']['name']).first()
+    # この関数は、db.session.commit() の前に呼ばれることを想定
+    # そのため、この関数内では commit しない
+
+    # データベースに称号リストが存在しなければ作成
+    for key, value in ACHIEVEMENTS.items():
+        if not Achievement.query.filter_by(name=value['name']).first():
+            ach = Achievement(name=value['name'], description=value['description'], icon=f"{key}.png")
+            db.session.add(ach)
+    
+    # 獲得済みの称号リスト
+    earned_ach_names = [ach.name for ach in user.achievements]
+
+    # 1. 「最初の一歩」
+    if ACHIEVEMENTS['first_step']['name'] not in earned_ach_names:
+        ach = Achievement.query.filter_by(name=ACHIEVEMENTS['first_step']['name']).first()
+        if ach:
             user.achievements.append(ach)
             flash(f"称号『{ach.name}』を獲得しました！", 'info')
-        if user.investments.count() > 0 and ACHIEVEMENTS['first_record']['name'] not in earned_ach_names:
-            ach = Achievement.query.filter_by(name=ACHIEVEMENTS['first_record']['name']).first()
+
+    # 2. 「記録の始まり」
+    if user.investments.count() > 0 and ACHIEVEMENTS['first_record']['name'] not in earned_ach_names:
+        ach = Achievement.query.filter_by(name=ACHIEVEMENTS['first_record']['name']).first()
+        if ach:
             user.achievements.append(ach)
             flash(f"称号『{ach.name}』を獲得しました！", 'info')
-        latest_investment = user.investments.order_by(Investment.year_month.desc()).first()
-        if latest_investment:
-            scores = {'total_fir': 0, 'saving_fir': 0, 'self_investment_fir': 0, 'financial_investment_fir': 0}
-            if latest_investment.income > 0:
-                scores['saving_fir'] = (latest_investment.saving / latest_investment.income) * 100
-            percentiles = calculate_percentiles(user, latest_investment, scores, {'age': 'all', 'income': 'all', 'industry': 'all'})
-            if percentiles['saving'] <= 10 and ACHIEVEMENTS['saving_guardian_gold']['name'] not in earned_ach_names:
-                ach = Achievement.query.filter_by(name=ACHIEVEMENTS['saving_guardian_gold']['name']).first()
-                user.achievements.append(ach)
-                flash(f"称号『{ach.name}』を獲得しました！", 'info')
-            elif percentiles['saving'] <= 25 and ACHIEVEMENTS['saving_guardian_silver']['name'] not in earned_ach_names:
-                ach = Achievement.query.filter_by(name=ACHIEVEMENTS['saving_guardian_silver']['name']).first()
-                user.achievements.append(ach)
-                flash(f"称号『{ach.name}』を獲得しました！", 'info')
-            elif percentiles['saving'] <= 50 and ACHIEVEMENTS['saving_guardian_bronze']['name'] not in earned_ach_names:
-                ach = Achievement.query.filter_by(name=ACHIEVEMENTS['saving_guardian_bronze']['name']).first()
-                user.achievements.append(ach)
-                flash(f"称号『{ach.name}』を獲得しました！", 'info')
-        db.session.commit()
+
+    # 3. ランキング系称号
+    latest_investment = user.investments.order_by(Investment.year_month.desc()).first()
+    if latest_investment:
+        scores = {'total_fir': 0, 'saving_fir': 0, 'self_investment_fir': 0, 'financial_investment_fir': 0}
+        if latest_investment.income > 0:
+            scores['saving_fir'] = (latest_investment.saving / latest_investment.income) * 100
+        
+        percentiles = calculate_percentiles(user, latest_investment, scores, {'age': 'all', 'income': 'all', 'industry': 'all'})
+        
+        if percentiles['saving'] <= 10 and ACHIEVEMENTS['saving_guardian_gold']['name'] not in earned_ach_names:
+            ach = Achievement.query.filter_by(name=ACHIEVEMENTS['saving_guardian_gold']['name']).first()
+            if ach: user.achievements.append(ach)
+            flash(f"称号『{ach.name}』を獲得しました！", 'info')
+        elif percentiles['saving'] <= 25 and ACHIEVEMENTS['saving_guardian_silver']['name'] not in earned_ach_names:
+            ach = Achievement.query.filter_by(name=ACHIEVEMENTS['saving_guardian_silver']['name']).first()
+            if ach: user.achievements.append(ach)
+            flash(f"称号『{ach.name}』を獲得しました！", 'info')
+        elif percentiles['saving'] <= 50 and ACHIEVEMENTS['saving_guardian_bronze']['name'] not in earned_ach_names:
+            ach = Achievement.query.filter_by(name=ACHIEVEMENTS['saving_guardian_bronze']['name']).first()
+            if ach: user.achievements.append(ach)
+            flash(f"称号『{ach.name}』を獲得しました！", 'info')
 
 if __name__ == '__main__':
     app.run(debug=True)
