@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+
+{% block title %}ようこそ{% endblock %}
+
+{% block content %}
+    <div class="jumbotron">
+        <h1 class="display-4">Portfolio Arena へようこそ！</h1>
+        <p class="lead">ここは、あなたの「未来への投資」を記録し、全国のライバルと静かに競い合う場所です。</p>
+        <hr class="my-4">
+        {% if current_user.is_authenticated %}
+            <p>こんにちは、{{ current_user.username }}さん！</p>
+            <a class="btn btn-primary btn-lg" href="{{ url_for('dashboard') }}" role="button">ダッシュボードへ</a>
+            <p>まずは新規登録またはログインして、あなたのアリーナへの第一歩を踏み出しましょう。</p>
+            <a class="btn btn-primary btn-lg" href="{{ url_for('register') }}" role="button">新規登録はこちら</a>
+        {% endif %}
+    </div>
+{% endblock %}

@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+
+{% block title %}プロフィール編集{% endblock %}
+
+{% block content %}
+    <h2>プロフィールの編集</h2>
+    <p>あなたの情報を登録することで、より精度の高いランキングに参加できます。</p>
+    <form method="POST" class="mb-5">
+        {{ form.hidden_tag() }}
+        <div class="form-group">
+            {{ form.age_range.label }}
+            {{ form.age_range(class="form-control") }}
+        </div>
+        <div class="form-group">
+            {{ form.income_range.label }}
+            {{ form.income_range(class="form-control") }}
+        </div>
+        <div class="form-group">
+            {{ form.industry.label }}
+            {{ form.industry(class="form-control") }}
+        </div>
+        <div class="form-group">
+            {{ form.region.label }}
+            {{ form.region(class="form-control") }}
+        </div>
+        <div class="form-group">
+            {{ form.submit(class="btn btn-success") }}
+        </div>
+    </form>
+
+    <hr>
+
+    <!-- ★★★ ここから称号表示セクションを追加 ★★★ -->
+    <h2>獲得した称号</h2>
+    {% if achievements %}
+        <div class="list-group">
+            {% for ach in achievements %}
+                <div class="list-group-item">
+                    <h5 class="mb-1">{{ ach.name }}</h5>
+                    <small>{{ ach.description }}</small>
+                </div>
+            {% endfor %}
+        </div>
+    {% else %}
+        <p>まだ獲得した称号はありません。データを記録して、アリーナの頂点を目指しましょう！</p>
+    {% endif %}
+    <!-- ★★★ ここまで ★★★ -->
+
+{% endblock %}

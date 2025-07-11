@@ -1,0 +1,233 @@
+{% extends "base.html" %}
+
+{% block title %}ダッシュボード{% endblock %}
+
+{% block content %}
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2>{{ current_user.username }}さんのダッシュボード</h2>
+        <small>最終更新: {{ latest_investment.year_month if latest_investment else 'データなし' }}</small>
+    </div>
+
+    <!-- フィルターフォーム -->
+    <div class="card mb-4">
+        <div class="card-body">
+            <h5 class="card-title">ランキングフィルター</h5>
+            <form method="GET" action="{{ url_for('dashboard') }}">
+                <div class="form-row">
+                    <div class="form-group col-md-3">
+                        <label for="age_filter">年代</label>
+                        <select id="age_filter" name="age_filter" class="form-control">
+                            <option value="all" {% if filters.age == 'all' %}selected{% endif %}>すべて</option>
+                            <option value="20代" {% if filters.age == '20代' %}selected{% endif %}>20代</option>
+                            <option value="30代" {% if filters.age == '30代' %}selected{% endif %}>30代</option>
+                            <option value="40代" {% if filters.age == '40代' %}selected{% endif %}>40代</option>
+                            <option value="50代" {% if filters.age == '50代' %}selected{% endif %}>50代</option>
+                            <option value="60代以上" {% if filters.age == '60代以上' %}selected{% endif %}>60代以上</option>
+                        </select>
+                    </div>
+                    <div class="form-group col-md-3">
+                        <label for="income_filter">年収レンジ</label>
+                        <select id="income_filter" name="income_filter" class="form-control">
+                            <option value="all" {% if filters.income == 'all' %}selected{% endif %}>すべて</option>
+                            <option value="-300万" {% if filters.income == '-300万' %}selected{% endif %}>-300万</option>
+                            <option value="300-500万" {% if filters.income == '300-500万' %}selected{% endif %}>300-500万</option>
+                            <option value="500-700万" {% if filters.income == '500-700万' %}selected{% endif %}>500-700万</option>
+                            <option value="700-1000万" {% if filters.income == '700-1000万' %}selected{% endif %}>700-1000万</option>
+                            <option value="1000万-" {% if filters.income == '1000万-' %}selected{% endif %}>1000万-</option>
+                        </select>
+                    </div>
+                    <div class="form-group col-md-3">
+                        <label for="industry_filter">業種</label>
+                        <select id="industry_filter" name="industry_filter" class="form-control">
+                            <option value="all" {% if filters.industry == 'all' %}selected{% endif %}>すべて</option>
+                            <option value="IT・通信" {% if filters.industry == 'IT・通信' %}selected{% endif %}>IT・通信</option>
+                            <option value="メーカー" {% if filters.industry == 'メーカー' %}selected{% endif %}>メーカー</option>
+                            <option value="金融" {% if filters.industry == '金融' %}selected{% endif %}>金融</option>
+                            <option value="医療・福祉" {% if filters.industry == '医療・福祉' %}selected{% endif %}>医療・福祉</option>
+                            <option value="その他" {% if filters.industry == 'その他' %}selected{% endif %}>その他</option>
+                        </select>
+                    </div>
+                    <div class="form-group col-md-3 align-self-end">
+                        <button type="submit" class="btn btn-info btn-block">絞り込む</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <h4>最新の未来投資率（FIR）</h4>
+    <div class="row">
+        <div class="col-md-6 mb-3">
+            <div class="card text-white bg-primary">
+                <div class="card-header d-flex justify-content-between">
+                    <span>総合のコロシアム</span>
+                    <span>上位 {{ percentiles.total | round(1) }} %</span>
+                </div>
+                <div class="card-body">
+                    <h5 class="card-title">{{ scores.total_fir | round(1) }} %</h5>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6 mb-3">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between">
+                    <span>堅実のコロシアム (貯金)</span>
+                    <span>上位 {{ percentiles.saving | round(1) }} %</span>
+                </div>
+                <div class="card-body">
+                    <h5 class="card-title">{{ scores.saving_fir | round(1) }} %</h5>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6 mb-3">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between">
+                    <span>知性のコロシアム (自己投資)</span>
+                    <span>上位 {{ percentiles.self_investment | round(1) }} %</span>
+                </div>
+                <div class="card-body">
+                    <h5 class="card-title">{{ scores.self_investment_fir | round(1) }} %</h5>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6 mb-3">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between">
+                    <span>戦略のコロシアム (金融投資)</span>
+                    <span>上位 {{ percentiles.financial_investment | round(1) }} %</span>
+                </div>
+                <div class="card-body">
+                    <h5 class="card-title">{{ scores.financial_investment_fir | round(1) }} %</h5>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <hr class="my-4">
+
+    <!-- ★★★ ここからグラフ表示セクションを追加 ★★★ -->
+    <h4>投資スタイルの推移</h4>
+    <div class="mb-5">
+        <canvas id="firChart"></canvas>
+    </div>
+    <!-- ★★★ ここまで ★★★ -->
+
+    <h4>月次データの入力</h4>
+    <form method="POST" action="{{ url_for('dashboard') }}">
+        {{ form.hidden_tag() }}
+        <div class="form-row">
+            <div class="form-group col-md-6">
+                {{ form.year_month.label }}
+                {{ form.year_month(class="form-control", placeholder="YYYY-MM") }}
+            </div>
+            <div class="form-group col-md-6">
+                {{ form.income.label }}
+                {{ form.income(class="form-control") }}
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group col-md-4">
+                {{ form.saving.label }}
+                {{ form.saving(class="form-control") }}
+            </div>
+            <div class="form-group col-md-4">
+                {{ form.self_investment.label }}
+                {{ form.self_investment(class="form-control") }}
+            </div>
+            <div class="form-group col-md-4">
+                {{ form.financial_investment.label }}
+                {{ form.financial_investment(class="form-control") }}
+            </div>
+        </div>
+        <div class="form-group">
+            {{ form.submit(class="btn btn-primary") }}
+        </div>
+    </form>
+
+    <hr class="my-4">
+
+    <h4>過去の記録</h4>
+    {% if investments %}
+        <table class="table table-striped">
+            <thead>
+                <tr>
+                    <th>年月</th>
+                    <th>手取り月収</th>
+                    <th>貯金額</th>
+                    <th>自己投資額</th>
+                    <th>金融投資額</th>
+                    <th>総合FIR</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for inv in investments %}
+                    <tr>
+                        <td>{{ inv.year_month }}</td>
+                        <td>{{ "{:,}".format(inv.income) }} 円</td>
+                        <td>{{ "{:,}".format(inv.saving) }} 円</td>
+                        <td>{{ "{:,}".format(inv.self_investment) }} 円</td>
+                        <td>{{ "{:,}".format(inv.financial_investment) }} 円</td>
+                        <td>
+                            {% set total_investment = inv.saving + inv.self_investment + inv.financial_investment %}
+                            {% if inv.income > 0 %}
+                                {{ (total_investment / inv.income * 100) | round(1) }} %
+                            {% else %}
+                                -
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <p>まだ記録がありません。</p>
+    {% endif %}
+
+    <!-- ★★★ ここからグラフ描画のJavaScriptを追加 ★★★ -->
+    <script>
+        const ctx = document.getElementById('firChart').getContext('2d');
+        const firChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: {{ chart_data.labels | safe }},
+                datasets: [{
+                    label: '貯金',
+                    data: {{ chart_data.saving_data }},
+                    borderColor: 'rgba(54, 162, 235, 1)',
+                    backgroundColor: 'rgba(54, 162, 235, 0.2)',
+                    fill: true,
+                    tension: 0.1
+                }, {
+                    label: '自己投資',
+                    data: {{ chart_data.self_investment_data }},
+                    borderColor: 'rgba(255, 206, 86, 1)',
+                    backgroundColor: 'rgba(255, 206, 86, 0.2)',
+                    fill: true,
+                    tension: 0.1
+                }, {
+                    label: '金融投資',
+                    data: {{ chart_data.financial_investment_data }},
+                    borderColor: 'rgba(75, 192, 192, 1)',
+                    backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                    fill: true,
+                    tension: 0.1
+                }]
+            },
+            options: {
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        stacked: true, // 積み上げグラフにする
+                        ticks: {
+                            callback: function(value, index, values) {
+                                return value + ' 円';
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    </script>
+    <!-- ★★★ ここまで ★★★ -->
+
+{% endblock %}

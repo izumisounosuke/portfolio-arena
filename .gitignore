@@ -1,0 +1,13 @@
+# 仮想環境
+venv/
+__pycache__/
+
+# .envファイル（秘密の情報）
+.env
+.flaskenv
+
+# データベースファイル
+data.sqlite
+
+# VS Codeの設定ファイル
+.vscode/
