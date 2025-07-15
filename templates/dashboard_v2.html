@@ -1,0 +1,172 @@
+{% extends "base.html" %}
+
+{% block title %}ダッシュボード V2{% endblock %}
+
+{% block content %}
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2>{{ current_user.username }}さんのダッシュボード</h2>
+        <button type="button" class="btn btn-primary" data-toggle="modal" data-target="#transactionModal">
+            <i data-lucide="plus-circle" class="icon"></i> 投資を記録する
+        </button>
+    </div>
+
+    <h4>{{ current_year }}年の年間投資率 (AIR)</h4>
+    <div class="row">
+        <div class="col-md-6 mb-4">
+            <div class="card text-white bg-primary h-100">
+                <div class="card-header d-flex justify-content-between">
+                    <span><i data-lucide="swords" class="icon"></i>総合</span>
+                </div>
+                <div class="card-body text-center d-flex align-items-center justify-content-center">
+                    <h1 class="display-4 font-weight-bold">{{ scores.total_air | round(1) }} %</h1>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6 mb-4">
+            <div class="card h-100">
+                <div class="card-header d-flex justify-content-between">
+                    <span><i data-lucide="shield" class="icon"></i>貯金</span>
+                </div>
+                <div class="card-body text-center d-flex align-items-center justify-content-center">
+                    <h1 class="display-4">{{ scores.saving_air | round(1) }} %</h1>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6 mb-4">
+            <div class="card h-100">
+                <div class="card-header d-flex justify-content-between">
+                    <span><i data-lucide="brain-circuit" class="icon"></i>自己投資</span>
+                </div>
+                <div class="card-body text-center d-flex align-items-center justify-content-center">
+                    <h1 class="display-4">{{ scores.self_investment_air | round(1) }} %</h1>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6 mb-4">
+            <div class="card h-100">
+                <div class="card-header d-flex justify-content-between">
+                    <span><i data-lucide="trending-up" class="icon"></i>金融投資</span>
+                </div>
+                <div class="card-body text-center d-flex align-items-center justify-content-center">
+                    <h1 class="display-4">{{ scores.financial_investment_air | round(1) }} %</h1>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <hr class="my-4">
+
+    <h4>総資産の推移</h4>
+    <div class="mb-5">
+        <canvas id="assetsChart"></canvas>
+    </div>
+
+    <!-- ★★★ ここからがタイムライン表示セクション ★★★ -->
+    <h4>最近の活動タイムライン</h4>
+    {% if transactions %}
+        <div class="list-group">
+            {% for tx in transactions %}
+                <div class="list-group-item list-group-item-action flex-column align-items-start">
+                    <div class="d-flex w-100 justify-content-between">
+                        <h5 class="mb-1">
+                            {% if tx.category == '貯金' %}
+                                <i data-lucide="piggy-bank" class="icon text-primary"></i>
+                            {% elif tx.category == '自己投資' %}
+                                <i data-lucide="brain" class="icon text-warning"></i>
+                            {% elif tx.category == '金融投資' %}
+                                <i data-lucide="area-chart" class="icon text-success"></i>
+                            {% endif %}
+                            {{ tx.category }}
+                        </h5>
+                        <small>{{ tx.date.strftime('%Y-%m-%d') }}</small>
+                    </div>
+                    <p class="mb-1 h4">{{ "{:,}".format(tx.amount) }} 円</p>
+                    <div class="d-flex w-100 justify-content-between align-items-center">
+                        <small class="text-muted">{{ tx.memo or '' }}</small>
+                        <form method="POST" action="{{ url_for('delete_transaction', transaction_id=tx.id) }}" onsubmit="return confirm('この記録を本当に削除しますか？');">
+                            <button type="submit" class="btn btn-sm btn-outline-danger">
+                                <i data-lucide="trash-2" style="width: 16px; height: 16px;"></i>
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            {% endfor %}
+        </div>
+    {% else %}
+        <p>まだ記録がありません。「投資を記録する」ボタンから、最初の活動を記録してみましょう！</p>
+    {% endif %}
+    <!-- ★★★ ここまで ★★★ -->
+
+
+    <!-- 記録入力用のモーダルウィンドウ -->
+    <div class="modal fade" id="transactionModal" tabindex="-1" role="dialog" aria-labelledby="transactionModalLabel" aria-hidden="true">
+        <div class="modal-dialog" role="document">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="transactionModalLabel">新しい投資を記録</h5>
+                    <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                        <span aria-hidden="true">&times;</span>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <form method="POST" action="{{ url_for('dashboard') }}">
+                        {{ form.hidden_tag() }}
+                        <div class="form-group">
+                            {{ form.date.label }}
+                            {{ form.date(class="form-control") }}
+                        </div>
+                        <div class="form-group">
+                            {{ form.category.label }}
+                            {{ form.category(class="form-control") }}
+                        </div>
+                        <div class="form-group">
+                            {{ form.amount.label }}
+                            {{ form.amount(class="form-control") }}
+                        </div>
+                        <div class="form-group">
+                            {{ form.memo.label }}
+                            {{ form.memo(class="form-control", rows=3) }}
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-dismiss="modal">閉じる</button>
+                            {{ form.submit(class="btn btn-primary") }}
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 総資産推移グラフ
+        if (document.getElementById('assetsChart') && {{ asset_chart_data.labels|tojson }} !== '[]') {
+            const ctxAssets = document.getElementById('assetsChart').getContext('2d');
+            const assetsChart = new Chart(ctxAssets, {
+                type: 'line',
+                data: {
+                    labels: {{ asset_chart_data.labels | safe }},
+                    datasets: [{
+                        label: '総資産',
+                        data: {{ asset_chart_data.data }},
+                        borderColor: 'rgba(255, 99, 132, 1)',
+                        backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                        fill: true,
+                        tension: 0.1
+                    }]
+                },
+                options: {
+                    scales: {
+                        y: {
+                            beginAtZero: false,
+                            ticks: {
+                                callback: function(value) {
+                                    return new Intl.NumberFormat('ja-JP', { style: 'currency', currency: 'JPY' }).format(value);
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+    </script>
+{% endblock %}

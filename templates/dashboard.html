@@ -57,47 +57,47 @@
 
     <h4>最新の未来投資率（FIR）</h4>
     <div class="row">
-        <div class="col-md-6 mb-3">
-            <div class="card text-white bg-primary">
+        <div class="col-md-6 mb-4">
+            <div class="card text-white bg-primary h-100">
                 <div class="card-header d-flex justify-content-between">
-                    <span>総合のコロシアム</span>
+                    <span><i data-lucide="swords" class="icon"></i>総合のコロシアム</span>
                     <span>上位 {{ percentiles.total | round(1) }} %</span>
                 </div>
-                <div class="card-body">
-                    <h5 class="card-title">{{ scores.total_fir | round(1) }} %</h5>
+                <div class="card-body text-center d-flex align-items-center justify-content-center">
+                    <h1 class="display-4 font-weight-bold">{{ scores.total_fir | round(1) }} %</h1>
                 </div>
             </div>
         </div>
-        <div class="col-md-6 mb-3">
-            <div class="card">
+        <div class="col-md-6 mb-4">
+            <div class="card h-100">
                 <div class="card-header d-flex justify-content-between">
-                    <span>堅実のコロシアム (貯金)</span>
+                    <span><i data-lucide="shield" class="icon"></i>堅実のコロシアム (貯金)</span>
                     <span>上位 {{ percentiles.saving | round(1) }} %</span>
                 </div>
-                <div class="card-body">
-                    <h5 class="card-title">{{ scores.saving_fir | round(1) }} %</h5>
+                <div class="card-body text-center d-flex align-items-center justify-content-center">
+                    <h1 class="display-4">{{ scores.saving_fir | round(1) }} %</h1>
                 </div>
             </div>
         </div>
-        <div class="col-md-6 mb-3">
-            <div class="card">
+        <div class="col-md-6 mb-4">
+            <div class="card h-100">
                 <div class="card-header d-flex justify-content-between">
-                    <span>知性のコロシアム (自己投資)</span>
+                    <span><i data-lucide="brain-circuit" class="icon"></i>知性のコロシアム (自己投資)</span>
                     <span>上位 {{ percentiles.self_investment | round(1) }} %</span>
                 </div>
-                <div class="card-body">
-                    <h5 class="card-title">{{ scores.self_investment_fir | round(1) }} %</h5>
+                <div class="card-body text-center d-flex align-items-center justify-content-center">
+                    <h1 class="display-4">{{ scores.self_investment_fir | round(1) }} %</h1>
                 </div>
             </div>
         </div>
-        <div class="col-md-6 mb-3">
-            <div class="card">
+        <div class="col-md-6 mb-4">
+            <div class="card h-100">
                 <div class="card-header d-flex justify-content-between">
-                    <span>戦略のコロシアム (金融投資)</span>
+                    <span><i data-lucide="trending-up" class="icon"></i>戦略のコロシアム (金融投資)</span>
                     <span>上位 {{ percentiles.financial_investment | round(1) }} %</span>
                 </div>
-                <div class="card-body">
-                    <h5 class="card-title">{{ scores.financial_investment_fir | round(1) }} %</h5>
+                <div class="card-body text-center d-flex align-items-center justify-content-center">
+                    <h1 class="display-4">{{ scores.financial_investment_fir | round(1) }} %</h1>
                 </div>
             </div>
         </div>
@@ -105,12 +105,16 @@
     
     <hr class="my-4">
 
-    <!-- ★★★ ここからグラフ表示セクションを追加 ★★★ -->
-    <h4>投資スタイルの推移</h4>
-    <div class="mb-5">
-        <canvas id="firChart"></canvas>
+    <div class="row">
+        <div class="col-md-8 mb-5">
+            <h4>投資スタイルの推移</h4>
+            <canvas id="firChart"></canvas>
+        </div>
+        <div class="col-md-4 mb-5">
+            <h4>最新の投資スタイル</h4>
+            <canvas id="styleRadarChart"></canvas>
+        </div>
     </div>
-    <!-- ★★★ ここまで ★★★ -->
 
     <h4>月次データの入力</h4>
     <form method="POST" action="{{ url_for('dashboard') }}">
@@ -148,7 +152,7 @@
 
     <h4>過去の記録</h4>
     {% if investments %}
-        <table class="table table-striped">
+        <table class="table table-striped table-hover">
             <thead>
                 <tr>
                     <th>年月</th>
@@ -183,51 +187,118 @@
         <p>まだ記録がありません。</p>
     {% endif %}
 
-    <!-- ★★★ ここからグラフ描画のJavaScriptを追加 ★★★ -->
     <script>
-        const ctx = document.getElementById('firChart').getContext('2d');
-        const firChart = new Chart(ctx, {
-            type: 'line',
-            data: {
-                labels: {{ chart_data.labels | safe }},
-                datasets: [{
-                    label: '貯金',
-                    data: {{ chart_data.saving_data }},
-                    borderColor: 'rgba(54, 162, 235, 1)',
-                    backgroundColor: 'rgba(54, 162, 235, 0.2)',
-                    fill: true,
-                    tension: 0.1
-                }, {
-                    label: '自己投資',
-                    data: {{ chart_data.self_investment_data }},
-                    borderColor: 'rgba(255, 206, 86, 1)',
-                    backgroundColor: 'rgba(255, 206, 86, 0.2)',
-                    fill: true,
-                    tension: 0.1
-                }, {
-                    label: '金融投資',
-                    data: {{ chart_data.financial_investment_data }},
-                    borderColor: 'rgba(75, 192, 192, 1)',
-                    backgroundColor: 'rgba(75, 192, 192, 0.2)',
-                    fill: true,
-                    tension: 0.1
-                }]
-            },
-            options: {
-                scales: {
-                    y: {
-                        beginAtZero: true,
-                        stacked: true, // 積み上げグラフにする
-                        ticks: {
-                            callback: function(value, index, values) {
-                                return value + ' 円';
+        // 折れ線グラフ
+        if (document.getElementById('firChart') && {{ chart_data.labels|tojson }} !== '[]') {
+            const ctxLine = document.getElementById('firChart').getContext('2d');
+            const firChart = new Chart(ctxLine, {
+                type: 'line',
+                data: {
+                    labels: {{ chart_data.labels | safe }},
+                    datasets: [{
+                        label: '貯金',
+                        data: {{ chart_data.saving_data }},
+                        borderColor: 'rgba(54, 162, 235, 1)',
+                        backgroundColor: 'rgba(54, 162, 235, 0.2)',
+                        fill: true,
+                        tension: 0.3
+                    }, {
+                        label: '自己投資',
+                        data: {{ chart_data.self_investment_data }},
+                        borderColor: 'rgba(255, 206, 86, 1)',
+                        backgroundColor: 'rgba(255, 206, 86, 0.2)',
+                        fill: true,
+                        tension: 0.3
+                    }, {
+                        label: '金融投資',
+                        data: {{ chart_data.financial_investment_data }},
+                        borderColor: 'rgba(75, 192, 192, 1)',
+                        backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                        fill: true,
+                        tension: 0.3
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    interaction: { mode: 'index', intersect: false },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            stacked: true,
+                            title: { display: true, text: '金額 (円)' }
+                        },
+                        x: {
+                            title: { display: true, text: '年月' }
+                        }
+                    },
+                    plugins: {
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    let label = context.dataset.label || '';
+                                    if (label) { label += ': '; }
+                                    if (context.parsed.y !== null) {
+                                        label += new Intl.NumberFormat('ja-JP', { style: 'currency', currency: 'JPY' }).format(context.parsed.y);
+                                    }
+                                    return label;
+                                }
                             }
                         }
                     }
                 }
-            }
-        });
-    </script>
-    <!-- ★★★ ここまで ★★★ -->
+            });
+        }
 
+        // レーダーチャート
+        if (document.getElementById('styleRadarChart') && {{ radar_chart_data.my_style|tojson }}) {
+            const ctxRadar = document.getElementById('styleRadarChart').getContext('2d');
+            const styleRadarChart = new Chart(ctxRadar, {
+                type: 'radar',
+                data: {
+                    labels: ['貯金', '自己投資', '金融投資'],
+                    datasets: [{
+                        label: 'あなたの投資スタイル',
+                        data: {{ radar_chart_data.my_style }},
+                        fill: true,
+                        backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                        borderColor: 'rgb(255, 99, 132)',
+                        pointBackgroundColor: 'rgb(255, 99, 132)',
+                        pointBorderColor: '#fff',
+                        pointHoverBackgroundColor: '#fff',
+                        pointHoverBorderColor: 'rgb(255, 99, 132)'
+                    }, {
+                        label: '平均的な投資スタイル',
+                        data: {{ radar_chart_data.avg_style }},
+                        fill: true,
+                        backgroundColor: 'rgba(54, 162, 235, 0.2)',
+                        borderColor: 'rgb(54, 162, 235)',
+                        pointBackgroundColor: 'rgb(54, 162, 235)',
+                        pointBorderColor: '#fff',
+                        pointHoverBackgroundColor: '#fff',
+                        pointHoverBorderColor: 'rgb(54, 162, 235)'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    elements: {
+                        line: {
+                            borderWidth: 3
+                        }
+                    },
+                    scales: {
+                        r: {
+                            angleLines: { display: false },
+                            suggestedMin: 0,
+                            suggestedMax: 100,
+                             ticks: {
+                                callback: function(value, index, values) {
+                                    return value + ' %';
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+    </script>
 {% endblock %}

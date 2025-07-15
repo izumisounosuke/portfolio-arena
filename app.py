@@ -1,19 +1,24 @@
 import os
 from datetime import datetime
-from flask import Flask, render_template, redirect, url_for, flash, request
+from dateutil.relativedelta import relativedelta
+from flask import Flask, render_template, redirect, url_for, flash, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 from flask_wtf import FlaskForm
-from wtforms import StringField, PasswordField, SubmitField, IntegerField, SelectField
+from wtforms import StringField, PasswordField, SubmitField, IntegerField, SelectField, DateField, TextAreaField
 from wtforms.validators import DataRequired, EqualTo, ValidationError
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from flask_bcrypt import Bcrypt
-from sqlalchemy import func
+from sqlalchemy import func, extract
 import json
+from flasgger import Swagger
+from flask_jwt_extended import create_access_token, get_jwt_identity, jwt_required, JWTManager
+from flask_cors import CORS
 
 # 1. アプリケーションの初期設定
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'default_secret_key')
+app.config['JWT_SECRET_KEY'] = os.getenv('SECRET_KEY', 'default_secret_key') 
 
 if os.getenv('DATABASE_URL'):
     app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL').replace("postgres://", "postgresql://", 1)
@@ -25,9 +30,37 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 migrate = Migrate(app, db)
 bcrypt = Bcrypt(app)
+
+# Webページ用のログインマネージャー
 login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'login'
+
+# JWTマネージャーの初期化
+jwt = JWTManager(app)
+
+# Swagger (API仕様書) の設定
+template = {
+    "swagger": "2.0",
+    "info": {
+        "title": "Portfolio Arena API",
+        "description": "API for Portfolio Arena",
+        "version": "1.0.0"
+    },
+    "securityDefinitions": {
+        "bearerAuth": {
+            "type": "apiKey",
+            "name": "Authorization",
+            "in": "header",
+            "description": "JWT Access Token (e.g. 'Bearer <token>')"
+        }
+    }
+}
+swagger = Swagger(app, template=template)
+
+# CORSの設定
+CORS(app, resources={r"/api/*": {"origins": "*"}})
+
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -55,7 +88,8 @@ class User(db.Model, UserMixin):
     income_range = db.Column(db.String(64), default='未設定')
     industry = db.Column(db.String(64), default='未設定')
     region = db.Column(db.String(64), default='未設定')
-    investments = db.relationship('Investment', backref='user', lazy='dynamic')
+    total_assets = db.Column(db.Integer, default=0)
+    transactions = db.relationship('Transaction', backref='user', lazy='dynamic')
     achievements = db.relationship('Achievement', secondary=user_achievements,
                                    backref=db.backref('users', lazy='dynamic'))
     
@@ -66,14 +100,20 @@ class User(db.Model, UserMixin):
     def check_password(self, password):
         return bcrypt.check_password_hash(self.password_hash, password)
 
-class Investment(db.Model):
-    __tablename__ = 'investments'
+class Transaction(db.Model):
+    __tablename__ = 'transactions'
     id = db.Column(db.Integer, primary_key=True)
-    year_month = db.Column(db.String(7), nullable=False)
-    income = db.Column(db.Integer, nullable=False)
-    saving = db.Column(db.Integer, nullable=False)
-    self_investment = db.Column(db.Integer, nullable=False)
-    financial_investment = db.Column(db.Integer, nullable=False)
+    date = db.Column(db.Date, nullable=False, default=datetime.utcnow)
+    category = db.Column(db.String(64), nullable=False)
+    amount = db.Column(db.Integer, nullable=False)
+    memo = db.Column(db.String(200))
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+
+class AssetHistory(db.Model):
+    __tablename__ = 'asset_history'
+    id = db.Column(db.Integer, primary_key=True)
+    date = db.Column(db.Date, nullable=False, default=datetime.utcnow)
+    amount = db.Column(db.Integer, nullable=False)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
 
 # 3. フォームの定義
@@ -91,37 +131,36 @@ class LoginForm(FlaskForm):
     password = PasswordField('パスワード', validators=[DataRequired()])
     submit = SubmitField('ログイン')
 
-class InvestmentForm(FlaskForm):
-    year_month = StringField('年月 (例: 2025-07)', validators=[DataRequired()])
-    income = IntegerField('手取り月収（円）', validators=[DataRequired()])
-    saving = IntegerField('貯金額（円）', default=0, validators=[DataRequired()])
-    self_investment = IntegerField('自己投資額（円）', default=0, validators=[DataRequired()])
-    financial_investment = IntegerField('金融投資額（円）', default=0, validators=[DataRequired()])
-    submit = SubmitField('この内容で記録する')
+class TransactionForm(FlaskForm):
+    date = DateField('日付', format='%Y-%m-%d', default=datetime.utcnow, validators=[DataRequired()])
+    category = SelectField('カテゴリー', choices=[('貯金', '貯金'), ('自己投資', '自己投資'), ('金融投資', '金融投資')], validators=[DataRequired()])
+    amount = IntegerField('金額（円）', validators=[DataRequired()])
+    memo = TextAreaField('メモ')
+    submit = SubmitField('記録する')
+
+class TotalAssetsForm(FlaskForm):
+    total_assets = IntegerField('現在の総資産額（円）', validators=[DataRequired()])
+    submit = SubmitField('更新する')
 
 class ProfileForm(FlaskForm):
     age_range = SelectField('年代', choices=[('未設定', '未設定'), ('20代', '20代'), ('30代', '30代'), ('40代', '40代'), ('50代', '50代'), ('60代以上', '60代以上')])
     income_range = SelectField('年収レンジ', choices=[('未設定', '未設定'), ('-300万', '-300万'), ('300-500万', '300-500万'), ('500-700万', '500-700万'), ('700-1000万', '700-1000万'), ('1000万-', '1000万-')])
     industry = SelectField('業種', choices=[('未設定', '未設定'), ('IT・通信', 'IT・通信'), ('メーカー', 'メーカー'), ('金融', '金融'), ('医療・福祉', '医療・福祉'), ('その他', 'その他')])
     region = SelectField('地域', choices=[('未設定', '未設定'), ('北海道', '北海道'), ('東北', '東北'), ('関東', '関東'), ('中部', '中部'), ('近畿', '近畿'), ('中国・四国', '中国・四国'), ('九州・沖縄', '九州・沖縄')])
-    submit = SubmitField('プロフィールを更新する')
+    submit_profile = SubmitField('プロフィールを更新する')
 
-# 4. ルーティング
+# 4. ルーティング (Webページ用)
 @app.route('/')
 def index():
     return render_template('index.html')
 
-# ★★★ register関数のロジックを修正 ★★★
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     form = RegistrationForm()
     if form.validate_on_submit():
         user = User(username=form.username.data, password=form.password.data)
         db.session.add(user)
-        # 称号のチェックをコミットの前に行う
-        check_achievements(user) 
-        # ユーザー作成と称号付与をまとめてコミット
-        db.session.commit() 
+        db.session.commit()
         flash('登録が完了しました。ログインしてください。','success')
         return redirect(url_for('login'))
     return render_template('register.html', form=form)
@@ -149,178 +188,150 @@ def logout():
 @app.route('/profile', methods=['GET', 'POST'])
 @login_required
 def profile():
-    form = ProfileForm()
-    if form.validate_on_submit():
-        current_user.age_range = form.age_range.data
-        current_user.income_range = form.income_range.data
-        current_user.industry = form.industry.data
-        current_user.region = form.region.data
+    profile_form = ProfileForm(prefix="profile")
+    assets_form = TotalAssetsForm(prefix="assets")
+
+    if profile_form.validate_on_submit() and profile_form.submit_profile.data:
+        current_user.age_range = profile_form.age_range.data
+        current_user.income_range = profile_form.income_range.data
+        current_user.industry = profile_form.industry.data
+        current_user.region = profile_form.region.data
         db.session.commit()
         flash('プロフィールを更新しました。', 'success')
         return redirect(url_for('profile'))
     
-    form.age_range.data = current_user.age_range
-    form.income_range.data = current_user.income_range
-    form.industry.data = current_user.industry
-    form.region.data = current_user.region
-    
-    user_achievements = current_user.achievements
-    
-    return render_template('profile.html', form=form, achievements=user_achievements)
+    if assets_form.validate_on_submit() and assets_form.submit.data:
+        current_user.total_assets = assets_form.total_assets.data
+        asset_record = AssetHistory(amount=assets_form.total_assets.data, user_id=current_user.id)
+        db.session.add(asset_record)
+        db.session.commit()
+        flash('総資産を更新しました。', 'success')
+        return redirect(url_for('profile'))
 
-@app.route('/dashboard', methods=['GET', 'POST'])
+    if request.method == 'GET':
+        profile_form.age_range.data = current_user.age_range
+        profile_form.income_range.data = current_user.income_range
+        profile_form.industry.data = current_user.industry
+        profile_form.region.data = current_user.region
+        assets_form.total_assets.data = current_user.total_assets
+    
+    return render_template('profile.html', profile_form=profile_form, assets_form=assets_form)
+
+@app.route('/dashboard')
 @login_required
 def dashboard():
-    form = InvestmentForm()
-    
-    if form.validate_on_submit():
-        existing_investment = Investment.query.filter_by(user_id=current_user.id, year_month=form.year_month.data).first()
-        if existing_investment:
-            existing_investment.income = form.income.data
-            existing_investment.saving = form.saving.data
-            existing_investment.self_investment = form.self_investment.data
-            existing_investment.financial_investment = form.financial_investment.data
-        else:
-            investment = Investment(year_month=form.year_month.data,
-                                    income=form.income.data,
-                                    saving=form.saving.data,
-                                    self_investment=form.self_investment.data,
-                                    financial_investment=form.financial_investment.data,
-                                    user_id=current_user.id)
-            db.session.add(investment)
-        
-        # 称号チェックをコミットの前に行う
-        check_achievements(current_user)
-        # データ保存と称号付与をまとめてコミット
-        db.session.commit()
-        flash(f"{form.year_month.data}の活動を記録しました！",'success')
+    form = TransactionForm()
+    transactions = Transaction.query.filter_by(user_id=current_user.id).order_by(Transaction.date.desc()).limit(10).all()
+    return render_template('dashboard_v2.html', form=form, transactions=transactions)
+
+@app.route('/transaction/<int:transaction_id>/delete', methods=['POST'])
+@login_required
+def delete_transaction(transaction_id):
+    transaction_to_delete = Transaction.query.get_or_404(transaction_id)
+    if transaction_to_delete.user_id != current_user.id:
+        flash('権限がありません。', 'danger')
         return redirect(url_for('dashboard'))
+    db.session.delete(transaction_to_delete)
+    db.session.commit()
+    flash('記録を一件削除しました。', 'success')
+    return redirect(url_for('dashboard'))
 
-    filters = {
-        'age': request.args.get('age_filter', 'all'),
-        'income': request.args.get('income_filter', 'all'),
-        'industry': request.args.get('industry_filter', 'all')
+# 5. APIエンドポイント
+@app.route('/api/v1/login', methods=['POST'])
+def api_login():
+    """
+    ユーザーを認証し、アクセストークンを発行する
+    ---
+    tags: [Auth]
+    parameters:
+      - in: body
+        name: body
+        schema:
+          type: object
+          required: [username, password]
+          properties:
+            username:
+              type: string
+            password:
+              type: string
+    responses:
+      200:
+        description: Success
+      401:
+        description: Unauthorized
+    """
+    data = request.get_json()
+    user = User.query.filter_by(username=data.get('username')).first()
+
+    if user and user.check_password(data.get('password')):
+        access_token = create_access_token(identity=user.id)
+        return jsonify(access_token=access_token)
+
+    return jsonify({"msg": "Bad username or password"}), 401
+
+@app.route('/api/v1/summary')
+@jwt_required()
+def api_summary():
+    """
+    ログインユーザーのダッシュボードサマリー情報を取得する
+    ---
+    tags: [Summary]
+    security:
+      - bearerAuth: []
+    """
+    user_id = get_jwt_identity()
+    user = User.query.get(user_id)
+    
+    response_data = {
+        'username': user.username,
+        'total_assets': user.total_assets,
     }
-    latest_investment = Investment.query.filter_by(user_id=current_user.id).order_by(Investment.year_month.desc()).first()
-    scores = {'total_fir': 0, 'saving_fir': 0, 'self_investment_fir': 0, 'financial_investment_fir': 0}
-    if latest_investment and latest_investment.income > 0:
-        total_investment = latest_investment.saving + latest_investment.self_investment + latest_investment.financial_investment
-        income = latest_investment.income
-        scores['total_fir'] = (total_investment / income) * 100
-        scores['saving_fir'] = (latest_investment.saving / income) * 100
-        scores['self_investment_fir'] = (latest_investment.self_investment / income) * 100
-        scores['financial_investment_fir'] = (latest_investment.financial_investment / income) * 100
-    
-    percentiles = calculate_percentiles(current_user, latest_investment, scores, filters)
-    
-    investments = Investment.query.filter_by(user_id=current_user.id).order_by(Investment.year_month.asc()).all()
+    return jsonify(response_data)
 
-    chart_data = {
-        'labels': json.dumps([inv.year_month for inv in investments]),
-        'saving_data': [inv.saving for inv in investments],
-        'self_investment_data': [inv.self_investment for inv in investments],
-        'financial_investment_data': [inv.financial_investment for inv in investments],
-    }
-    
-    display_investments = investments[::-1]
+@app.route('/api/v1/transactions', methods=['GET', 'POST'])
+@jwt_required()
+def api_transactions():
+    """
+    ユーザーの投資記録を取得、または新規作成する
+    ---
+    tags: [Transactions]
+    security:
+      - bearerAuth: []
+    """
+    user_id = get_jwt_identity()
+    if request.method == 'POST':
+        data = request.get_json()
+        new_transaction = Transaction(
+            date=datetime.strptime(data['date'], '%Y-%m-%d').date(),
+            category=data['category'],
+            amount=data['amount'],
+            memo=data.get('memo', ''),
+            user_id=user_id
+        )
+        db.session.add(new_transaction)
+        db.session.commit()
+        return jsonify({'message': 'Transaction created!', 'id': new_transaction.id}), 201
 
-    return render_template('dashboard.html', form=form, scores=scores, percentiles=percentiles, latest_investment=latest_investment, investments=display_investments, filters=filters, chart_data=chart_data)
+    transactions = Transaction.query.filter_by(user_id=user_id).order_by(Transaction.date.desc()).all()
+    output = []
+    for tx in transactions:
+        output.append({
+            'id': tx.id,
+            'date': tx.date.strftime('%Y-%m-%d'),
+            'category': tx.category,
+            'amount': tx.amount,
+            'memo': tx.memo
+        })
+    return jsonify({'transactions': output})
 
-def calculate_percentiles(target_user, target_investment, scores, filters):
-    percentiles = {'total': 100, 'saving': 100, 'self_investment': 100, 'financial_investment': 100}
-    if not target_investment:
-        return percentiles
-    latest_month = target_investment.year_month
-    query = Investment.query.join(User).filter(Investment.year_month == latest_month)
-    if filters['age'] != 'all':
-        query = query.filter(User.age_range == filters['age'])
-    if filters['income'] != 'all':
-        query = query.filter(User.income_range == filters['income'])
-    if filters['industry'] != 'all':
-        query = query.filter(User.industry == filters['industry'])
-    all_investments_in_group = query.all()
-    all_scores = []
-    for inv in all_investments_in_group:
-        if inv.income > 0:
-            total_inv = inv.saving + inv.self_investment + inv.financial_investment
-            score = {
-                'total': (total_inv / inv.income) * 100,
-                'saving': (inv.saving / inv.income) * 100,
-                'self_investment': (inv.self_investment / inv.income) * 100,
-                'financial_investment': (inv.financial_investment / inv.income) * 100
-            }
-            all_scores.append(score)
-    total_users = len(all_scores)
-    if total_users == 0:
-        return percentiles
-    my_score = {
-        'total': scores.get('total_fir', 0),
-        'saving': scores.get('saving_fir', 0),
-        'self_investment': scores.get('self_investment_fir', 0),
-        'financial_investment': scores.get('financial_investment_fir', 0)
-    }
-    for category in ['total', 'saving', 'self_investment', 'financial_investment']:
-        higher_rank_count = sum(1 for score in all_scores if score[category] > my_score[category])
-        percentiles[category] = (higher_rank_count / total_users) * 100 if total_users > 0 else 100
-    return percentiles
-
-ACHIEVEMENTS = {
-    'first_step': {'name': '最初の一歩', 'description': 'アリーナへようこそ！最初のユーザーとして登録されました。'},
-    'first_record': {'name': '記録の始まり', 'description': '初めて月次データを記録しました。'},
-    'saving_guardian_bronze': {'name': '貯蓄の守り手（銅）', 'description': '貯金部門で上位50%以内を達成しました。'},
-    'saving_guardian_silver': {'name': '貯蓄の守り手（銀）', 'description': '貯金部門で上位25%以内を達成しました。'},
-    'saving_guardian_gold': {'name': '貯蓄の守り手（金）', 'description': '貯金部門で上位10%以内を達成しました。'},
-}
-
-# ★★★ check_achievements関数のロジックを修正 ★★★
-def check_achievements(user):
-    # この関数は、db.session.commit() の前に呼ばれることを想定
-    # そのため、この関数内では commit しない
-
-    # データベースに称号リストが存在しなければ作成
-    for key, value in ACHIEVEMENTS.items():
-        if not Achievement.query.filter_by(name=value['name']).first():
-            ach = Achievement(name=value['name'], description=value['description'], icon=f"{key}.png")
-            db.session.add(ach)
-    
-    # 獲得済みの称号リスト
-    earned_ach_names = [ach.name for ach in user.achievements]
-
-    # 1. 「最初の一歩」
-    if ACHIEVEMENTS['first_step']['name'] not in earned_ach_names:
-        ach = Achievement.query.filter_by(name=ACHIEVEMENTS['first_step']['name']).first()
-        if ach:
-            user.achievements.append(ach)
-            flash(f"称号『{ach.name}』を獲得しました！", 'info')
-
-    # 2. 「記録の始まり」
-    if user.investments.count() > 0 and ACHIEVEMENTS['first_record']['name'] not in earned_ach_names:
-        ach = Achievement.query.filter_by(name=ACHIEVEMENTS['first_record']['name']).first()
-        if ach:
-            user.achievements.append(ach)
-            flash(f"称号『{ach.name}』を獲得しました！", 'info')
-
-    # 3. ランキング系称号
-    latest_investment = user.investments.order_by(Investment.year_month.desc()).first()
-    if latest_investment:
-        scores = {'total_fir': 0, 'saving_fir': 0, 'self_investment_fir': 0, 'financial_investment_fir': 0}
-        if latest_investment.income > 0:
-            scores['saving_fir'] = (latest_investment.saving / latest_investment.income) * 100
-        
-        percentiles = calculate_percentiles(user, latest_investment, scores, {'age': 'all', 'income': 'all', 'industry': 'all'})
-        
-        if percentiles['saving'] <= 10 and ACHIEVEMENTS['saving_guardian_gold']['name'] not in earned_ach_names:
-            ach = Achievement.query.filter_by(name=ACHIEVEMENTS['saving_guardian_gold']['name']).first()
-            if ach: user.achievements.append(ach)
-            flash(f"称号『{ach.name}』を獲得しました！", 'info')
-        elif percentiles['saving'] <= 25 and ACHIEVEMENTS['saving_guardian_silver']['name'] not in earned_ach_names:
-            ach = Achievement.query.filter_by(name=ACHIEVEMENTS['saving_guardian_silver']['name']).first()
-            if ach: user.achievements.append(ach)
-            flash(f"称号『{ach.name}』を獲得しました！", 'info')
-        elif percentiles['saving'] <= 50 and ACHIEVEMENTS['saving_guardian_bronze']['name'] not in earned_ach_names:
-            ach = Achievement.query.filter_by(name=ACHIEVEMENTS['saving_guardian_bronze']['name']).first()
-            if ach: user.achievements.append(ach)
-            flash(f"称号『{ach.name}』を獲得しました！", 'info')
+# ヘルパー関数
+def get_annual_income_from_range(income_range_str):
+    if income_range_str == '-300万': return 3000000
+    elif income_range_str == '300-500万': return 3000000
+    elif income_range_str == '500-700万': return 5000000
+    elif income_range_str == '700-1000万': return 7000000
+    elif income_range_str == '1000万-': return 10000000
+    else: return 0
 
 if __name__ == '__main__':
     app.run(debug=True)
