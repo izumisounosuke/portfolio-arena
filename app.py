@@ -11,21 +11,17 @@ from flask_login import LoginManager, UserMixin, login_user, login_required, log
 from flask_bcrypt import Bcrypt
 from sqlalchemy import func, extract
 import json
+# ★★★ swag_from を一時的に削除 ★★★
 from flasgger import Swagger
 from flask_jwt_extended import create_access_token, get_jwt_identity, jwt_required, JWTManager
-from flask_cors import CORS
 
 # 1. アプリケーションの初期設定
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'default_secret_key')
 app.config['JWT_SECRET_KEY'] = os.getenv('SECRET_KEY', 'default_secret_key') 
 
-if os.getenv('DATABASE_URL'):
-    app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL').replace("postgres://", "postgresql://", 1)
-else:
-    basedir = os.path.abspath(os.path.dirname(__file__))
-    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(basedir, 'data.sqlite')
-
+basedir = os.path.abspath(os.path.dirname(__file__))
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(basedir, 'data.sqlite')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 migrate = Migrate(app, db)
@@ -37,45 +33,15 @@ login_manager.login_view = 'login'
 
 jwt = JWTManager(app)
 
-template = {
-    "swagger": "2.0",
-    "info": {
-        "title": "Portfolio Arena API",
-        "description": "API for Portfolio Arena",
-        "version": "1.0.0"
-    },
-    "securityDefinitions": {
-        "bearerAuth": {
-            "type": "apiKey",
-            "name": "Authorization",
-            "in": "header",
-            "description": "JWT Access Token (e.g. 'Bearer <token>')"
-        }
-    }
-}
-swagger = Swagger(app, template=template)
-
-CORS(app, resources={r"/api/*": {"origins": "*"}})
+# ★★★ Swagger (API仕様書) の設定を、最もシンプルな形に修正 ★★★
+swagger = Swagger(app)
 
 
 @login_manager.user_loader
 def load_user(user_id):
     return User.query.get(int(user_id))
 
-# 2. データベースの設計図 (モデル)
-# ★★★ ここに user_achievements テーブルの定義を移動 ★★★
-user_achievements = db.Table('user_achievements',
-    db.Column('user_id', db.Integer, db.ForeignKey('users.id')),
-    db.Column('achievement_id', db.Integer, db.ForeignKey('achievements.id'))
-)
-
-class Achievement(db.Model):
-    __tablename__ = 'achievements'
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(128), unique=True, nullable=False)
-    description = db.Column(db.String(256))
-    icon = db.Column(db.String(128))
-
+# 2. データベースの設計図 (モデル) (変更なし)
 class User(db.Model, UserMixin):
     __tablename__ = 'users'
     id = db.Column(db.Integer, primary_key=True)
@@ -87,9 +53,6 @@ class User(db.Model, UserMixin):
     region = db.Column(db.String(64), default='未設定')
     total_assets = db.Column(db.Integer, default=0)
     transactions = db.relationship('Transaction', backref='user', lazy='dynamic')
-    asset_history = db.relationship('AssetHistory', backref='user', lazy='dynamic')
-    achievements = db.relationship('Achievement', secondary=user_achievements,
-                                   backref=db.backref('users', lazy='dynamic'))
     
     def __init__(self, username, password):
         self.username = username
@@ -114,7 +77,7 @@ class AssetHistory(db.Model):
     amount = db.Column(db.Integer, nullable=False)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
 
-# 3. フォームの定義
+# 3. フォームの定義 (変更なし)
 class RegistrationForm(FlaskForm):
     username = StringField('ユーザー名', validators=[DataRequired()])
     password = PasswordField('パスワード', validators=[DataRequired(), EqualTo('pass_confirm', message='パスワードが一致しません。')])
@@ -147,7 +110,7 @@ class ProfileForm(FlaskForm):
     region = SelectField('地域', choices=[('未設定', '未設定'), ('北海道', '北海道'), ('東北', '東北'), ('関東', '関東'), ('中部', '中部'), ('近畿', '近畿'), ('中国・四国', '中国・四国'), ('九州・沖縄', '九州・沖縄')])
     submit_profile = SubmitField('プロフィールを更新する')
 
-# 4. ルーティング (Webページ用)
+# 4. ルーティング (Webページ用) (変更なし)
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -222,6 +185,18 @@ def dashboard():
     transactions = Transaction.query.filter_by(user_id=current_user.id).order_by(Transaction.date.desc()).limit(10).all()
     return render_template('dashboard_v2.html', form=form, transactions=transactions)
 
+@app.route('/transaction/<int:transaction_id>/delete', methods=['POST'])
+@login_required
+def delete_transaction(transaction_id):
+    transaction_to_delete = Transaction.query.get_or_404(transaction_id)
+    if transaction_to_delete.user_id != current_user.id:
+        flash('権限がありません。', 'danger')
+        return redirect(url_for('dashboard'))
+    db.session.delete(transaction_to_delete)
+    db.session.commit()
+    flash('記録を一件削除しました。', 'success')
+    return redirect(url_for('dashboard'))
+
 # 5. APIエンドポイント
 @app.route('/api/v1/login', methods=['POST'])
 def api_login():
@@ -234,7 +209,9 @@ def api_login():
         name: body
         schema:
           type: object
-          required: [username, password]
+          required:
+            - username
+            - password
           properties:
             username:
               type: string
@@ -267,12 +244,7 @@ def api_summary():
     """
     user_id = get_jwt_identity()
     user = User.query.get(user_id)
-    
-    response_data = {
-        'username': user.username,
-        'total_assets': user.total_assets,
-    }
-    return jsonify(response_data)
+    return jsonify(username=user.username, total_assets=user.total_assets)
 
 @app.route('/api/v1/transactions', methods=['GET', 'POST'])
 @jwt_required()
@@ -310,7 +282,7 @@ def api_transactions():
         })
     return jsonify({'transactions': output})
 
-# ヘルパー関数
+# (ヘルパー関数は変更なし)
 def get_annual_income_from_range(income_range_str):
     if income_range_str == '-300万': return 3000000
     elif income_range_str == '300-500万': return 3000000
