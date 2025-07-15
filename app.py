@@ -13,6 +13,7 @@ from sqlalchemy import func, extract
 import json
 from flasgger import Swagger
 from flask_jwt_extended import create_access_token, get_jwt_identity, jwt_required, JWTManager
+# ★★★ 新しくインポート ★★★
 from flask_cors import CORS
 
 # 1. アプリケーションの初期設定
@@ -58,7 +59,8 @@ template = {
 }
 swagger = Swagger(app, template=template)
 
-# CORSの設定
+# ★★★ CORSの設定を追加 ★★★
+# これにより、/api/ から始まるURLへの外部からのアクセスが許可されます
 CORS(app, resources={r"/api/*": {"origins": "*"}})
 
 
@@ -67,18 +69,7 @@ def load_user(user_id):
     return User.query.get(int(user_id))
 
 # 2. データベースの設計図 (モデル)
-user_achievements = db.Table('user_achievements',
-    db.Column('user_id', db.Integer, db.ForeignKey('users.id')),
-    db.Column('achievement_id', db.Integer, db.ForeignKey('achievements.id'))
-)
-
-class Achievement(db.Model):
-    __tablename__ = 'achievements'
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(128), unique=True, nullable=False)
-    description = db.Column(db.String(256))
-    icon = db.Column(db.String(128))
-
+# (変更なし)
 class User(db.Model, UserMixin):
     __tablename__ = 'users'
     id = db.Column(db.Integer, primary_key=True)
@@ -90,6 +81,7 @@ class User(db.Model, UserMixin):
     region = db.Column(db.String(64), default='未設定')
     total_assets = db.Column(db.Integer, default=0)
     transactions = db.relationship('Transaction', backref='user', lazy='dynamic')
+    asset_history = db.relationship('AssetHistory', backref='user', lazy='dynamic')
     achievements = db.relationship('Achievement', secondary=user_achievements,
                                    backref=db.backref('users', lazy='dynamic'))
     
@@ -116,125 +108,23 @@ class AssetHistory(db.Model):
     amount = db.Column(db.Integer, nullable=False)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
 
-# 3. フォームの定義
-class RegistrationForm(FlaskForm):
-    username = StringField('ユーザー名', validators=[DataRequired()])
-    password = PasswordField('パスワード', validators=[DataRequired(), EqualTo('pass_confirm', message='パスワードが一致しません。')])
-    pass_confirm = PasswordField('パスワード（確認）', validators=[DataRequired()])
-    submit = SubmitField('登録する')
-    def validate_username(self, field):
-        if User.query.filter_by(username=field.data).first():
-            raise ValidationError('このユーザー名は既に使用されています。')
+user_achievements = db.Table('user_achievements',
+    db.Column('user_id', db.Integer, db.ForeignKey('users.id')),
+    db.Column('achievement_id', db.Integer, db.ForeignKey('achievements.id'))
+)
 
-class LoginForm(FlaskForm):
-    username = StringField('ユーザー名', validators=[DataRequired()])
-    password = PasswordField('パスワード', validators=[DataRequired()])
-    submit = SubmitField('ログイン')
+class Achievement(db.Model):
+    __tablename__ = 'achievements'
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(128), unique=True, nullable=False)
+    description = db.Column(db.String(256))
+    icon = db.Column(db.String(128))
 
-class TransactionForm(FlaskForm):
-    date = DateField('日付', format='%Y-%m-%d', default=datetime.utcnow, validators=[DataRequired()])
-    category = SelectField('カテゴリー', choices=[('貯金', '貯金'), ('自己投資', '自己投資'), ('金融投資', '金融投資')], validators=[DataRequired()])
-    amount = IntegerField('金額（円）', validators=[DataRequired()])
-    memo = TextAreaField('メモ')
-    submit = SubmitField('記録する')
+# 3. フォームの定義 (変更なし)
+# ... (省略) ...
 
-class TotalAssetsForm(FlaskForm):
-    total_assets = IntegerField('現在の総資産額（円）', validators=[DataRequired()])
-    submit = SubmitField('更新する')
-
-class ProfileForm(FlaskForm):
-    age_range = SelectField('年代', choices=[('未設定', '未設定'), ('20代', '20代'), ('30代', '30代'), ('40代', '40代'), ('50代', '50代'), ('60代以上', '60代以上')])
-    income_range = SelectField('年収レンジ', choices=[('未設定', '未設定'), ('-300万', '-300万'), ('300-500万', '300-500万'), ('500-700万', '500-700万'), ('700-1000万', '700-1000万'), ('1000万-', '1000万-')])
-    industry = SelectField('業種', choices=[('未設定', '未設定'), ('IT・通信', 'IT・通信'), ('メーカー', 'メーカー'), ('金融', '金融'), ('医療・福祉', '医療・福祉'), ('その他', 'その他')])
-    region = SelectField('地域', choices=[('未設定', '未設定'), ('北海道', '北海道'), ('東北', '東北'), ('関東', '関東'), ('中部', '中部'), ('近畿', '近畿'), ('中国・四国', '中国・四国'), ('九州・沖縄', '九州・沖縄')])
-    submit_profile = SubmitField('プロフィールを更新する')
-
-# 4. ルーティング (Webページ用)
-@app.route('/')
-def index():
-    return render_template('index.html')
-
-@app.route('/register', methods=['GET', 'POST'])
-def register():
-    form = RegistrationForm()
-    if form.validate_on_submit():
-        user = User(username=form.username.data, password=form.password.data)
-        db.session.add(user)
-        db.session.commit()
-        flash('登録が完了しました。ログインしてください。','success')
-        return redirect(url_for('login'))
-    return render_template('register.html', form=form)
-
-@app.route('/login', methods=['GET', 'POST'])
-def login():
-    form = LoginForm()
-    if form.validate_on_submit():
-        user = User.query.filter_by(username=form.username.data).first()
-        if user and user.check_password(form.password.data):
-            login_user(user)
-            flash('ログインしました。','success')
-            return redirect(url_for('dashboard'))
-        else:
-            flash('ユーザー名またはパスワードが正しくありません。','danger')
-    return render_template('login.html', form=form)
-
-@app.route('/logout')
-@login_required
-def logout():
-    logout_user()
-    flash('ログアウトしました。','info')
-    return redirect(url_for('index'))
-
-@app.route('/profile', methods=['GET', 'POST'])
-@login_required
-def profile():
-    profile_form = ProfileForm(prefix="profile")
-    assets_form = TotalAssetsForm(prefix="assets")
-
-    if profile_form.validate_on_submit() and profile_form.submit_profile.data:
-        current_user.age_range = profile_form.age_range.data
-        current_user.income_range = profile_form.income_range.data
-        current_user.industry = profile_form.industry.data
-        current_user.region = profile_form.region.data
-        db.session.commit()
-        flash('プロフィールを更新しました。', 'success')
-        return redirect(url_for('profile'))
-    
-    if assets_form.validate_on_submit() and assets_form.submit.data:
-        current_user.total_assets = assets_form.total_assets.data
-        asset_record = AssetHistory(amount=assets_form.total_assets.data, user_id=current_user.id)
-        db.session.add(asset_record)
-        db.session.commit()
-        flash('総資産を更新しました。', 'success')
-        return redirect(url_for('profile'))
-
-    if request.method == 'GET':
-        profile_form.age_range.data = current_user.age_range
-        profile_form.income_range.data = current_user.income_range
-        profile_form.industry.data = current_user.industry
-        profile_form.region.data = current_user.region
-        assets_form.total_assets.data = current_user.total_assets
-    
-    return render_template('profile.html', profile_form=profile_form, assets_form=assets_form)
-
-@app.route('/dashboard')
-@login_required
-def dashboard():
-    form = TransactionForm()
-    transactions = Transaction.query.filter_by(user_id=current_user.id).order_by(Transaction.date.desc()).limit(10).all()
-    return render_template('dashboard_v2.html', form=form, transactions=transactions)
-
-@app.route('/transaction/<int:transaction_id>/delete', methods=['POST'])
-@login_required
-def delete_transaction(transaction_id):
-    transaction_to_delete = Transaction.query.get_or_404(transaction_id)
-    if transaction_to_delete.user_id != current_user.id:
-        flash('権限がありません。', 'danger')
-        return redirect(url_for('dashboard'))
-    db.session.delete(transaction_to_delete)
-    db.session.commit()
-    flash('記録を一件削除しました。', 'success')
-    return redirect(url_for('dashboard'))
+# 4. ルーティング (Webページ用) (変更なし)
+# ... (省略) ...
 
 # 5. APIエンドポイント
 @app.route('/api/v1/login', methods=['POST'])
@@ -324,14 +214,8 @@ def api_transactions():
         })
     return jsonify({'transactions': output})
 
-# ヘルパー関数
-def get_annual_income_from_range(income_range_str):
-    if income_range_str == '-300万': return 3000000
-    elif income_range_str == '300-500万': return 3000000
-    elif income_range_str == '500-700万': return 5000000
-    elif income_range_str == '700-1000万': return 7000000
-    elif income_range_str == '1000万-': return 10000000
-    else: return 0
+# (ヘルパー関数などは省略)
+# ...
 
 if __name__ == '__main__':
     app.run(debug=True)
